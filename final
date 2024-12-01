@@ -1,0 +1,110 @@
+#include <Wire.h>                 // I2C 통신을 위한 라이브러리 포함
+#include <LiquidCrystal_I2C.h>    // I2C를 통해 LCD를 제어하는 라이브러리 포함
+
+// 핀 설정
+const int triggerPin1 = 3;  // 첫 번째 초음파 센서의 트리거 핀 설정
+const int echoPin1 = 2;     // 첫 번째 초음파 센서의 에코 핀 설정
+const int triggerPin2 = 5;  // 두 번째 초음파 센서의 트리거 핀 설정
+const int echoPin2 = 4;     // 두 번째 초음파 센서의 에코 핀 설정
+const int ledPin = 8;       // LED 핀 설정 (조명 시뮬레이션)
+const int numReadings = 5;  // 초음파 센서 거리 측정을 평균 내기 위한 측정 횟수 설정
+
+// I2C LCD 설정 (주소 0x27, 크기 16x2)
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+int distance1 = 0;          // 첫 번째 초음파 센서 거리 변수
+int distance2 = 0;          // 두 번째 초음파 센서 거리 변수
+bool isLightOn = true;      // 조명이 켜져 있는지 상태를 나타내는 변수
+unsigned long lastDetectedTime = 0; // 마지막으로 사람이 감지된 시간 저장
+const unsigned long noMotionDuration = 30000; // 사람이 감지되지 않을 때까지 대기 시간 (30초)
+
+// 초음파 센서로 거리 읽기 함수
+long readUltrasonicDistance(int triggerPin, int echoPin) {
+  pinMode(triggerPin, OUTPUT);       // 트리거 핀을 출력 모드로 설정
+  digitalWrite(triggerPin, LOW);    // 트리거 핀을 LOW로 설정해 초기화
+  delayMicroseconds(2);             // 신호 안정화를 위해 대기
+  digitalWrite(triggerPin, HIGH);   // 초음파 신호 발사를 위해 트리거 핀 HIGH
+  delayMicroseconds(10);            // 초음파 신호 발사 유지
+  digitalWrite(triggerPin, LOW);    // 트리거 핀 다시 LOW로 설정
+  pinMode(echoPin, INPUT);          // 에코 핀을 입력 모드로 설정
+  return pulseIn(echoPin, HIGH);    // 에코 핀에서 신호를 받을 때까지 시간 측정
+}
+
+void setup() {
+  pinMode(ledPin, OUTPUT);          // LED 핀을 출력 모드로 설정
+  digitalWrite(ledPin, HIGH);       // LED를 초기 상태에서 켜기
+  lcd.init();                       // I2C LCD 초기화
+  lcd.backlight();                  // LCD 백라이트 켜기
+  lcd.setCursor(0, 0);              // LCD 첫 번째 줄 첫 번째 칸에 커서 설정
+  lcd.print("Initial State");       // 초기 메시지 출력
+  lcd.setCursor(0, 1);              // LCD 두 번째 줄 첫 번째 칸에 커서 설정
+  lcd.print("Light is ON");         // 조명이 켜져 있다는 메시지 출력
+  delay(2000);                      // 메시지를 2초 동안 유지
+  lcd.clear();                      // LCD 화면 초기화
+  Serial.begin(9600);               // 시리얼 통신 초기화 (9600 bps)
+}
+
+void loop() {
+  int totalDistance1 = 0;           // 첫 번째 초음파 센서 거리 합계 초기화
+  int totalDistance2 = 0;           // 두 번째 초음파 센서 거리 합계 초기화
+
+  // 첫 번째 초음파 거리 평균 계산
+  for (int i = 0; i < numReadings; i++) {
+    totalDistance1 += 0.01723 * readUltrasonicDistance(triggerPin1, echoPin1);
+    delay(10); // 측정 사이 간격
+  }
+  distance1 = totalDistance1 / numReadings; // 평균 거리 계산
+  delay(50); // 안정화를 위한 짧은 대기
+
+  // 두 번째 초음파 거리 평균 계산
+  for (int i = 0; i < numReadings; i++) {
+    totalDistance2 += 0.01723 * readUltrasonicDistance(triggerPin2, echoPin2);
+    delay(10); // 측정 사이 간격
+  }
+  distance2 = totalDistance2 / numReadings; // 평균 거리 계산
+
+  // 초음파 센서로 사람 감지
+  if (distance1 < 20 || distance2 < 20) { // 두 센서 중 하나라도 20cm 이내에 물체 감지
+    lastDetectedTime = millis(); // 마지막 감지 시간 갱신
+    if (!isLightOn) {
+      digitalWrite(ledPin, HIGH); // LED 켬
+      isLightOn = true;
+    }
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Person detected"); // 사람이 감지되었다고 LCD에 출력
+    lcd.setCursor(0, 1);
+    lcd.print("Keeping light ON"); // 조명을 유지 중이라고 LCD에 출력
+    Serial.println("Object detected, keeping light ON");
+  } else { // 사람 감지되지 않음
+    if (millis() - lastDetectedTime > noMotionDuration) { // 대기 시간 초과
+      if (isLightOn) {
+        digitalWrite(ledPin, LOW); // LED 끔
+        isLightOn = false;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("No person found");
+        lcd.setCursor(0, 1);
+        lcd.print("Turning off light"); // 조명 꺼진다는 메시지 출력
+        Serial.println("No object detected, turning off light");
+      }
+    } else { // 대기 시간 내 (아직 끄지 않음)
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("No person nearby");
+      lcd.setCursor(0, 1);
+      lcd.print("waiting 30 sec"); // 대기 중이라는 메시지 출력
+      Serial.println("No object detected, waiting...");
+    }
+  }
+
+  // 거리 정보와 LED 상태를 시리얼 모니터에 출력
+  Serial.print("Distance1: ");
+  Serial.print(distance1);
+  Serial.print(" cm, Distance2: ");
+  Serial.print(distance2);
+  Serial.print(" cm, LED state: ");
+  Serial.println(isLightOn ? "ON" : "OFF");
+
+  delay(500); // 0.5초 대기 후 다음 루프 실행
+}
